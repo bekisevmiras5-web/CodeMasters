@@ -2,7 +2,7 @@ import os, sqlite3, time
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 
-t = os.getenv("TOKEN") or input("TOKEN: ").strip()
+t = os.getenv("TOKEN") or input("TOKEN: 8433217743:AAHd8WqL2qjJh2l2AhYPysdrh7jE0dncy8c").strip()
 b = Bot(token = 8433217743:AAHd8WqL2qjJh2l2AhYPysdrh7jE0dncy8c)
 d = Dispatcher(b)
 
@@ -94,3 +94,4 @@ async def f5(m: types.Message):
 
 if __name__ == "__main__":
     executor.start_polling(d, skip_updates=True)
+
