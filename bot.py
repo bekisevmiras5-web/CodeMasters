@@ -1,97 +1,106 @@
-import os, sqlite3, time
-from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
+import logging
+import sqlite3
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-t = os.getenv("TOKEN") or input("TOKEN: 8433217743:AAHd8WqL2qjJh2l2AhYPysdrh7jE0dncy8c").strip()
-b = Bot(token = 8433217743:AAHd8WqL2qjJh2l2AhYPysdrh7jE0dncy8c)
-d = Dispatcher(b)
 
-db = sqlite3.connect("study.db")
-cur = db.cursor()
-cur.execute("CREATE TABLE IF NOT EXISTS tasks(id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER, txt TEXT, done INTEGER)")
-cur.execute("CREATE TABLE IF NOT EXISTS stats(uid INTEGER, day INTEGER, cnt INTEGER)")
-db.commit()
 
-def add(u,txt):
-    cur.execute("INSERT INTO tasks(uid,txt,done) VALUES(?,?,0)", (u,txt))
-    db.commit()
+#подкл.
+logging.basicConfig(level=logging.INFO)
 
-def ls(u):
-    return cur.execute("SELECT id,txt,done FROM tasks WHERE uid=? ORDER BY id", (u,)).fetchall()
 
-def mark(u,i):
-    cur.execute("UPDATE tasks SET done=1 WHERE uid=? AND id=?", (u,i))
-    db.commit()
 
-def clear(u):
-    cur.execute("DELETE FROM tasks WHERE uid=?", (u,))
-    db.commit()
+#создат таблицу для того что бы не вылетало при перезапуске бота
+conn = sqlite3.connect('tasks.db', check_same_thread=False)
+c = conn.cursor()
+c.execute('''CREATE TABLE IF NOT EXISTS tasks (user_id INTEGER, task TEXT, done INTEGER)''')
+conn.commit()
 
-def inc(u):
-    d0 = int(time.time()//86400)
-    r = cur.execute("SELECT cnt FROM stats WHERE uid=? AND day=?", (u,d0)).fetchone()
-    if r:
-        cur.execute("UPDATE stats SET cnt=cnt+1 WHERE uid=? AND day=?", (u,d0))
-    else:
-        cur.execute("INSERT INTO stats(uid,day,cnt) VALUES(?,?,1)", (u,d0))
-    db.commit()
 
-def getcnt(u):
-    d0 = int(time.time()//86400)
-    r = cur.execute("SELECT cnt FROM stats WHERE uid=? AND day=?", (u,d0)).fetchone()
-    return r[0] if r else 0
 
-@d.message_handler(commands=["start"])
-async def f(m: types.Message):
-    await m.reply("StudyTracker. /add текст | /list | /done id | /clear | /stats")
 
-@d.message_handler(commands=["add"])
-async def f1(m: types.Message):
-    u = m.from_user.id
-    txt = m.text.replace("/add","",1).strip()
-    if not txt:
-        await m.reply("Напиши задачу после /add")
+#привет андрей
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Привет! Я deVISE. Команды:\n/add - добавить задачу\n/view - посмотреть задачи\n/complete - отметить выполненной\n/delete - удалить задачу")
+
+
+
+
+#добовлять команды
+async def add_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    task_text = ' '.join(context.args)
+    if not task_text:
+        await update.message.reply_text("Напиши задачу после команды: /add прибратся дома")
         return
-    add(u, txt)
-    await m.reply("Добавлено")
+    c.execute("INSERT INTO tasks (user_id, task, done) VALUES (?, ?, 0)", (user_id, task_text))
+    conn.commit()
+    await update.message.reply_text(f"добавлено: {task_text}")
 
-@d.message_handler(commands=["list"])
-async def f2(m: types.Message):
-    u = m.from_user.id
-    r = ls(u)
-    if not r:
-        await m.reply("Список пуст")
+
+
+    
+#логика чек листа задач 
+async def view_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    c.execute("SELECT rowid, task, done FROM tasks WHERE user_id = ?", (user_id,))
+    user_tasks = c.fetchall()
+    if not user_tasks:
+        await update.message.reply_text(" Нет задач. Добавь через /add")
         return
-    lines = []
-    for row in r:
-        s = "✅" if row[2] else "❌"
-        lines.append(f"{row[0]}. {row[1]} {s}")
-    await m.reply("\n".join(lines))
+    text = " Твои задачи:\n"
+    for task_id, task_text, done in user_tasks:
+        status = "✅" if done else "❌"
+        text += f"{task_id}. {status} {task_text}\n"
+    await update.message.reply_text(text)
 
-@d.message_handler(commands=["done"])
-async def f3(m: types.Message):
-    u = m.from_user.id
+
+
+
+
+    
+#логика выполнения задачи
+async def complete_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     try:
-        i = int(m.text.split()[1])
+        task_id = int(context.args[0])
+        c.execute("UPDATE tasks SET done = 1 WHERE user_id = ? AND rowid = ?", (user_id, task_id))
+        conn.commit()
+        if c.rowcount > 0:
+            await update.message.reply_text(f"поздровляю задача {task_id} выполнена!")
+        else:
+            await update.message.reply_text(" Задача не найдена")
     except:
-        await m.reply("Использование: /done <id>")
-        return
-    mark(u,i)
-    inc(u)
-    await m.reply("Отмечено")
+        await update.message.reply_text("Использование: /complete 1")
 
-@d.message_handler(commands=["clear"])
-async def f4(m: types.Message):
-    u = m.from_user.id
-    clear(u)
-    await m.reply("Очищено")
 
-@d.message_handler(commands=["stats"])
-async def f5(m: types.Message):
-    u = m.from_user.id
-    n = getcnt(u)
-    await m.reply(f"Сегодня выполнено: {n}")
+
+
+#логика удаления задач
+async def delete_task(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    try:
+        task_id = int(context.args[0])
+        c.execute("DELETE FROM tasks WHERE user_id = ? AND rowid = ?", (user_id, task_id))
+        conn.commit()
+        if c.rowcount > 0:
+            await update.message.reply_text(f"️ Задача {task_id} удалена!")
+        else:
+            await update.message.reply_text(" Задача не найдена")
+    except:
+        await update.message.reply_text("Использование: /delete 1")
+
+
+        
+#код. слова
+def main():
+    app = Application.builder().token("8433217743:AAHd8WqL2qjJh2l2AhYPysdrh7jE0dncy8c").build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("add", add_task))
+    app.add_handler(CommandHandler("view", view_tasks))
+    app.add_handler(CommandHandler("complete", complete_task))
+    app.add_handler(CommandHandler("delete", delete_task))
+    app.run_polling()
 
 if __name__ == "__main__":
-    executor.start_polling(d, skip_updates=True)
-
+    main()
